@@ -18,11 +18,18 @@ class APIFootballClient:
             with open(cache_file, "r") as f:
                 return json.load(f)
 
-        params = {'date': date_str, 'timezone': 'Asia/Jakarta'}
+        # Hapus 'timezone' dari params agar compatible dengan semua jenis akun API-Football
+        params = {'date': date_str}
         try:
-            response = requests.get(f"{self.base_url}/fixtures", headers=self.headers, params=params, timeout=10)
+            response = requests.get(f"{self.base_url}/fixtures", headers=self.headers, params=params, timeout=15)
             response.raise_for_status()
-            data = response.json().get('response', [])
+            res_json = response.json()
+
+            # Log jika ada error khusus dari API-Football (misal: kuota habis)
+            if res_json.get('errors'):
+                print(f"  [API Debug Error]: {res_json.get('errors')}")
+
+            data = res_json.get('response', [])
         except Exception as e:
             print(f"❌ Error fetching fixtures: {e}")
             return []
@@ -40,8 +47,9 @@ class APIFootballClient:
                 "league_id": item['league']['id']
             })
 
-        with open(cache_file, "w") as f:
-            json.dump(formatted, f, indent=2)
+        if formatted:
+            with open(cache_file, "w") as f:
+                json.dump(formatted, f, indent=2)
 
         return formatted
 
@@ -55,9 +63,10 @@ class APIFootballClient:
 
         params = {'h2h': f"{team_id_1}-{team_id_2}", 'last': last_n}
         try:
-            response = requests.get(f"{self.base_url}/fixtures/headtohead", headers=self.headers, params=params, timeout=10)
+            response = requests.get(f"{self.base_url}/fixtures/headtohead", headers=self.headers, params=params, timeout=15)
             response.raise_for_status()
-            data = response.json().get('response', [])
+            res_json = response.json()
+            data = res_json.get('response', [])
         except Exception as e:
             print(f"❌ Error fetching H2H: {e}")
             return []
@@ -75,7 +84,8 @@ class APIFootballClient:
                 "score": item['goals']
             })
 
-        with open(cache_file, "w") as f:
-            json.dump(formatted, f, indent=2)
+        if formatted:
+            with open(cache_file, "w") as f:
+                json.dump(formatted, f, indent=2)
 
         return formatted[:last_n]
