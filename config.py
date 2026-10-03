@@ -1,12 +1,13 @@
 import os
 
-# API Key & API-Football Settings
-FOOTBALL_API_KEY = os.getenv("FOOTBALL_API_KEY", "311363def3f6531198c08527522c296e")
-API_FOOTBALL_URL = "https://v3.football.api-sports.io"
+# API Configurations
+FOOTBALL_API_KEY = os.getenv("FOOTBALL_API_KEY", "")
 
-# Filter Engine Settings
-MIN_ODDS = 1.25
-MAX_ODDS = 1.60
-MIN_EXPECTED_VALUE = 0.00 # +2% ROI Minimum
-TIME_WINDOW_MINUTES = 30  # Selisih maksimal kickoff WIB/UTC
-FUZZY_THRESHOLD = 0.50    # Minimal similarity score N-Gram (50%)
+# Filter Engine Tuning Parameters (Diperluas untuk menjaring lebih banyak rekomendasi)
+MIN_ODDS = 1.20              # Menjangkau odds yang lebih rendah (favorit kuat)
+MAX_ODDS = 1.75              # Menjangkau odds hingga 1.75
+MIN_EXPECTED_VALUE = -0.05   # Toleransi nilai EV diperlonggar dari +0.02 ke -0.05
+
+# Matcher Settings
+TIME_WINDOW_MINUTES = 180
+FUZZY_THRESHOLD = 0.15
