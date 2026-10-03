@@ -4,7 +4,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from utils.text_cleaner import clean_team_name
 
 class EntityMatcher:
-    def __init__(self, time_window_minutes=180, threshold=0.20):  # Ambang batas diturunkan ke 20%
+    def __init__(self, time_window_minutes=180, threshold=0.20):
         self.time_window = time_window_minutes
         self.threshold = threshold
 
@@ -19,7 +19,7 @@ class EntityMatcher:
         api_aways = [clean_team_name(f['away']) for f in api_fixtures]
 
         all_names = list(set(odds_homes + odds_aways + api_homes + api_aways))
-        all_names = [n for n in all_names if n]  # Hapus string kosong
+        all_names = [n for n in all_names if n]
 
         if not all_names:
             return []
@@ -45,6 +45,19 @@ class EntityMatcher:
                 total_score = float((sim_h[i, j] + sim_a[i, j]) / 2.0)
 
                 if total_score >= self.threshold and total_score > best_score:
+                    # Validasi Time Window (Abaikan jika jam merupakan fallback T20:00:00)
+                    odds_iso = odds.get('kickoff_iso', '')
+                    if not odds_iso.endswith('T20:00:00'):
+                        try:
+                            odds_time = datetime.fromisoformat(odds_iso)
+                            api_time = datetime.fromisoformat(api['kickoff_iso'])
+                            time_diff = abs((odds_time - api_time).total_seconds()) / 60.0
+                            
+                            if time_diff > self.time_window:
+                                continue
+                        except (ValueError, KeyError):
+                            pass
+
                     best_score = total_score
                     best_idx = j
 
