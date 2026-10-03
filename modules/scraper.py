@@ -11,19 +11,16 @@ class ParlayScraper:
         scraped_matches = []
         
         async with async_playwright() as p:
-            # Launch Chromium dengan opsi stabilitas untuk lingkungan Linux/GitHub Actions
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
-                    "--disable-accelerated-2d-canvas",
                     "--disable-gpu"
                 ]
             )
             
-            # Buat konteks browser dengan User-Agent & Viewport seperti browser desktop asli
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                 viewport={"width": 1366, "height": 768},
@@ -34,60 +31,47 @@ class ParlayScraper:
             page = await context.new_page()
             
             try:
-                # Navigasi ke target URL
                 print(f"  [Scraper] Navigating to {self.url}...")
-                response = await page.goto(self.url, wait_until="domcontentloaded", timeout=60000)
-                
-                if response and response.status != 200:
-                    print(f"  [Scraper] Warning: Server returned status code {response.status}")
+                await page.goto(self.url, wait_until="networkidle", timeout=60000)
+                await page.wait_for_timeout(5000) # Beri jeda agar iframe/AJAX selesai dimuat
 
-                # Beri jeda 5 detik untuk memastikan skrip AJAX/JavaScript odds selesai merefresh tabel
-                await page.wait_for_timeout(5000)
-
-                # Ambil semua elemen baris tabel pertandingan
-                # Mendukung elemen tr standar maupun class match-row
-                rows = await page.query_selector_all("table tr")
-                
                 wib_tz = zoneinfo.ZoneInfo("Asia/Jakarta")
                 today_date_str = datetime.now(wib_tz).strftime("%Y-%m-%d")
 
-                for row in rows:
-                    # Ambil teks mentah dari setiap baris
-                    text_content = await row.inner_text()
-                    lines = [line.strip() for line in text_content.split("\n") if line.strip()]
+                # kumpulkan semua frame (main frame + iframe embed)
+                all_frames = page.frames
+                print(f"  [Scraper] Found {len(all_frames)} frame(s) in page.")
 
-                    # Tentukan elemen selector spesifik jika ada
-                    home_el = await row.query_selector(".home-team, td.home, td:nth-child(2)")
-                    away_el = await row.query_selector(".away-team, td.away, td:nth-child(4)")
-                    odds_el = await row.query_selector(".odds-val, td.odds, td:nth-child(5)")
-                    time_el = await row.query_selector(".match-time, td.time, td:nth-child(1)")
+                for frame in all_frames:
+                    try:
+                        rows = await frame.query_selector_all("tr")
+                        for row in rows:
+                            text_content = await row.inner_text()
+                            lines = [line.strip() for line in text_content.split("\n") if line.strip()]
 
-                    if home_el and away_el and odds_el:
-                        home_text = (await home_el.inner_text()).strip()
-                        away_text = (await away_el.inner_text()).strip()
-                        odds_raw = (await odds_el.inner_text()).strip()
-                        time_raw = (await time_el.inner_text()).strip() if time_el else "20:00"
+                            # Parsing umum berdasarkan baris teks jika tabel tidak menggunakan class baku
+                            if len(lines) >= 3:
+                                # Mencari angka desimal yang bertindak sebagai Odds (misal: 1.35)
+                                odds_val = None
+                                for item in lines:
+                                    clean_item = item.replace(",", ".")
+                                    try:
+                                        val = float(clean_item)
+                                        if 1.01 <= val <= 10.0: # Range odds realistis
+                                            odds_val = val
+                                            break
+                                    except ValueError:
+                                        continue
 
-                        # Validasi nilai odds (harus berupa angka/desimal)
-                        try:
-                            odds_val = float(odds_raw.replace(",", "."))
-                        except ValueError:
-                            continue
-
-                        # Bersihkan format waktu kick-off (HH:MM)
-                        clean_time = time_raw if ":" in time_raw else "20:00"
-                        if len(clean_time) == 4 and clean_time[1] == ":":
-                            clean_time = "0" + clean_time
-
-                        kickoff_iso = f"{today_date_str}T{clean_time[:5]}:00"
-
-                        if home_text and away_text and odds_val > 1.0:
-                            scraped_matches.append({
-                                "home": home_text,
-                                "away": away_text,
-                                "odds_value": odds_val,
-                                "kickoff_iso": kickoff_iso
-                            })
+                                if odds_val and len(lines) >= 2:
+                                    scraped_matches.append({
+                                        "home": lines[0],
+                                        "away": lines[1],
+                                        "odds_value": odds_val,
+                                        "kickoff_iso": f"{today_date_str}T20:00:00"
+                                    })
+                    except Exception:
+                        continue
 
             except Exception as e:
                 print(f"❌ [Scraper Error]: {e}")
@@ -96,17 +80,3 @@ class ParlayScraper:
                 await browser.close()
                 
         return scraped_matches
-
-
-# ==========================================
-# SIMULASI PENGUJIAN LOKAL
-# ==========================================
-if __name__ == "__main__":
-    async def main():
-        scraper = ParlayScraper()
-        results = await scraper.fetch_odds_data()
-        print(f"\n✅ Total Scraped Matches: {len(results)}")
-        for m in results[:5]:
-            print(f"  - {m['home']} vs {m['away']} | Odds: {m['odds_value']} | Kickoff: {m['kickoff_iso']}")
-
-    asyncio.run(main())
