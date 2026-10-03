@@ -4,7 +4,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from utils.text_cleaner import clean_team_name
 
 class EntityMatcher:
-    def __init__(self, time_window_minutes=180, threshold=0.35):
+    def __init__(self, time_window_minutes=30, threshold=0.35):
         self.time_window = time_window_minutes
         self.threshold = threshold
 
@@ -12,14 +12,12 @@ class EntityMatcher:
         if not odds_matches or not api_fixtures:
             return []
 
-        # 1. Bersihkan seluruh nama tim sekaligus
         odds_homes = [clean_team_name(m['home']) for m in odds_matches]
         odds_aways = [clean_team_name(m['away']) for m in odds_matches]
         
         api_homes = [clean_team_name(f['home']) for f in api_fixtures]
         api_aways = [clean_team_name(f['away']) for f in api_fixtures]
 
-        # 2. Fit TF-IDF Vectorizer pada seluruh vocabulary sekaligus
         all_names = list(set(odds_homes + odds_aways + api_homes + api_aways))
         if not all_names:
             return []
@@ -27,27 +25,36 @@ class EntityMatcher:
         vectorizer = TfidfVectorizer(analyzer='char', ngram_range=(2, 3))
         vectorizer.fit(all_names)
 
-        # 3. Transformasi ke matriks TF-IDF
         vec_odds_h = vectorizer.transform(odds_homes)
         vec_odds_a = vectorizer.transform(odds_aways)
         vec_api_h = vectorizer.transform(api_homes)
         vec_api_a = vectorizer.transform(api_aways)
 
-        # 4. Perkalian matriks instan (Cos-Sim 2D)
         sim_h = cosine_similarity(vec_odds_h, vec_api_h)
         sim_a = cosine_similarity(vec_odds_a, vec_api_a)
 
         matched_results = []
 
-        # 5. Iterasi cepat berbasis skor matriks
         for i, odds in enumerate(odds_matches):
             best_idx = -1
             best_score = 0.0
 
             for j, api in enumerate(api_fixtures):
-                total_score = (sim_h[i, j] + sim_a[i, j]) / 2.0
+                total_score = float((sim_h[i, j] + sim_a[i, j]) / 2.0)
 
                 if total_score >= self.threshold and total_score > best_score:
+                    # Validasi Time Window strictly jika jam kickoff tersedia
+                    try:
+                        odds_time = datetime.fromisoformat(odds['kickoff_iso'])
+                        api_time = datetime.fromisoformat(api['kickoff_iso'])
+                        time_diff = abs((odds_time - api_time).total_seconds()) / 60.0
+                        
+                        # Jika selisih waktu melebihi batas window, lewati matching
+                        if time_diff > self.time_window:
+                            continue
+                    except (ValueError, KeyError):
+                        pass
+
                     best_score = total_score
                     best_idx = j
 
