@@ -45,22 +45,24 @@ async def run_pipeline():
         print("  [!] Tidak ada jadwal pertandingan resmi dari API. Menghentikan pipeline.")
         return []
 
-    # Step 3: Pencocokan Entitas Tim Berbasis Matrix Vectorization
+    # Sampel Debug untuk Memantau Struktur Data
+    print(f"  🔍 [Debug Sample Scraped]: {odds_data[0]}")
+    print(f"  🔍 [Debug Sample API]: {api_fixtures[0]}")
+
+    # Step 3: Pencocokan Entitas Tim (Full String Matcher)
     print("\n[3/4] Matching Entities (Vectorized TF-IDF)...")
     matcher = EntityMatcher(time_window_minutes=TIME_WINDOW_MINUTES, threshold=FUZZY_THRESHOLD)
     matched_results = matcher.match(odds_data, api_fixtures)
     print(f" -> Berhasil mencocokkan {len(matched_results)} pertandingan.")
 
-    # Step 4: Selective H2H Ingestion & +EV Filtering (Optimasi Kecepatan)
+    # Step 4: Selective H2H Ingestion & +EV Filtering
     print("\n[4/4] Ingesting H2H & Evaluating +EV Filter...")
     filtered_matched = []
     
-    # Hanya panggil API H2H untuk pertandingan yang memenuhi kisaran Odds dasar (1.25 - 1.60)
     for item in matched_results:
         odds_val = float(item['odds_data'].get('odds_value', 0.0))
         if MIN_ODDS <= odds_val <= MAX_ODDS:
             api_item = item['api_data']
-            # Ambil data H2H secara selektif
             item['api_data']['h2h'] = api_client.get_h2h_matches(
                 team_id_1=api_item['home_id'],
                 team_id_2=api_item['away_id'],
