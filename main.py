@@ -20,13 +20,17 @@ from modules.filter_engine import ParlayFilterEngine
 async def run_pipeline():
     print("🚀 Running Mix Parlay High Probability Pipeline...")
 
-    # 1. Web Scraping Odds dari Situs Parlay
+    # Step 1: Web Scraping Odds dari Situs Parlay
     print("\n[1/4] Scraping Odds dari mainbolakaki.pro...")
     scraper = ParlayScraper()
     odds_data = await scraper.fetch_odds_data()
     print(f" -> Berhasil mengikis {len(odds_data)} pertandingan dari situs.")
 
-    # 2. Ambil Jadwal Resmi dari API-Football (Menggunakan Zona Waktu WIB)
+    if not odds_data:
+        print("  [!] Tidak ada data odds yang di-scrape. Menghentikan pipeline.")
+        return []
+
+    # Step 2: Ambil Jadwal Resmi dari API-Football (Zona Waktu WIB)
     print("\n[2/4] Fetching API-Football Fixtures...")
     wib_tz = zoneinfo.ZoneInfo("Asia/Jakarta")
     today_str = datetime.now(wib_tz).strftime("%Y-%m-%d")
@@ -37,25 +41,37 @@ async def run_pipeline():
     api_fixtures = api_client.get_fixtures_by_date(today_str)
     print(f" -> Berhasil mengambil {len(api_fixtures)} pertandingan resmi dari API.")
 
-    # 3. Pencocokan Entitas Tim & Pengayaan Data H2H
-    print("\n[3/4] Matching Entities (Time Window + N-Gram TF-IDF)...")
+    if not api_fixtures:
+        print("  [!] Tidak ada jadwal pertandingan resmi dari API. Menghentikan pipeline.")
+        return []
+
+    # Step 3: Pencocokan Entitas Tim Berbasis Matrix Vectorization
+    print("\n[3/4] Matching Entities (Vectorized TF-IDF)...")
     matcher = EntityMatcher(time_window_minutes=TIME_WINDOW_MINUTES, threshold=FUZZY_THRESHOLD)
     matched_results = matcher.match(odds_data, api_fixtures)
-    
-    # Enrich data dengan Head-to-Head (H2H) untuk setiap pertandingan yang berhasil cocok
-    for item in matched_results:
-        api_item = item['api_data']
-        item['api_data']['h2h'] = api_client.get_h2h_matches(
-            team_id_1=api_item['home_id'],
-            team_id_2=api_item['away_id'],
-            last_n=5
-        )
-    print(f" -> Berhasil mencocokkan & memperkaya data {len(matched_results)} pertandingan.")
+    print(f" -> Berhasil mencocokkan {len(matched_results)} pertandingan.")
 
-    # 4. Filter Matematika +EV & High Probability
-    print("\n[4/4] Evaluating +EV & High Probability Filter...")
+    # Step 4: Selective H2H Ingestion & +EV Filtering (Optimasi Kecepatan)
+    print("\n[4/4] Ingesting H2H & Evaluating +EV Filter...")
+    filtered_matched = []
+    
+    # Hanya panggil API H2H untuk pertandingan yang memenuhi kisaran Odds dasar (1.25 - 1.60)
+    for item in matched_results:
+        odds_val = float(item['odds_data'].get('odds_value', 0.0))
+        if MIN_ODDS <= odds_val <= MAX_ODDS:
+            api_item = item['api_data']
+            # Ambil data H2H secara selektif
+            item['api_data']['h2h'] = api_client.get_h2h_matches(
+                team_id_1=api_item['home_id'],
+                team_id_2=api_item['away_id'],
+                last_n=5
+            )
+            filtered_matched.append(item)
+
+    print(f" -> {len(filtered_matched)} pertandingan masuk dalam evaluasi EV mendalam.")
+
     filter_engine = ParlayFilterEngine(min_odds=MIN_ODDS, max_odds=MAX_ODDS, min_ev=MIN_EXPECTED_VALUE)
-    final_picks = filter_engine.evaluate(matched_results)
+    final_picks = filter_engine.evaluate(filtered_matched)
 
     print("\n🎯 FINAL HIGH PROBABILITY PARLAY PICKS:")
     if not final_picks:
