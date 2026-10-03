@@ -36,7 +36,20 @@ def test_get_h2h_matches_with_mock_api(api_client):
         assert h2h[0]["score"]["home"] == 3
 
 def test_h2h_cache_creation(api_client, tmp_path):
-    mock_response = {"response": []}
+    # Menyediakan mock response yang valid agar data ter-format dan file cache dibuat
+    mock_response = {
+        "response": [
+            {
+                "fixture": {"id": 2002, "date": "2026-10-04T20:00:00+00:00"},
+                "league": {"name": "Premier League"},
+                "teams": {
+                    "home": {"id": 10, "name": "Team A", "winner": True},
+                    "away": {"id": 20, "name": "Team B", "winner": False}
+                },
+                "goals": {"home": 1, "away": 0}
+            }
+        ]
+    }
     with patch("requests.get") as mock_get:
         mock_get.return_value.status_code = 200
         mock_get.return_value.json.return_value = mock_response
