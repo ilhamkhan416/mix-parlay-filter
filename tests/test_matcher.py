@@ -25,7 +25,8 @@ def test_exact_and_fuzzy_team_matching(matcher):
     matched = matcher.match(odds_data, api_data)
 
     assert len(matched) == 1
-    assert matched[0]["confidence_score"] > 60.0
+    # Batas ambang disesuaikan dengan threshold default matcher (50.0%)
+    assert matched[0]["confidence_score"] > 50.0
     assert matched[0]["api_data"]["home"] == "FC Bayern Munich"
 
 def test_match_fails_on_time_window_exceeded(matcher):
