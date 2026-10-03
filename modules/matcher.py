@@ -12,7 +12,6 @@ class EntityMatcher:
         if not odds_matches or not api_fixtures:
             return []
 
-        # Gabungkan Home + Away menjadi 1 string pertandingan untuk perbandingan penuh
         odds_match_strings = [
             f"{clean_team_name(m['home'])} {clean_team_name(m['away'])}" 
             for m in odds_matches
@@ -34,7 +33,6 @@ class EntityMatcher:
         vec_odds = vectorizer.transform(odds_match_strings)
         vec_api = vectorizer.transform(api_match_strings)
 
-        # Hitung Similarity Matriks
         sim_matrix = cosine_similarity(vec_odds, vec_api)
 
         matched_results = []
@@ -47,6 +45,22 @@ class EntityMatcher:
                 score = float(sim_matrix[i, j])
 
                 if score >= self.threshold and score > best_score:
+                    # Validasi Time Window (Abaikan hanya jika kickoff memakai jam fallback T20:00:00)
+                    odds_iso = odds.get('kickoff_iso', '')
+                    api_iso = api.get('kickoff_iso', '')
+
+                    if odds_iso and api_iso and not odds_iso.endswith('T20:00:00'):
+                        try:
+                            odds_time = datetime.fromisoformat(odds_iso)
+                            api_time = datetime.fromisoformat(api_iso)
+                            time_diff = abs((odds_time - api_time).total_seconds()) / 60.0
+                            
+                            # Jika selisih waktu melebihi batas window, lewati matching
+                            if time_diff > self.time_window:
+                                continue
+                        except (ValueError, KeyError):
+                            pass
+
                     best_score = score
                     best_idx = j
 
