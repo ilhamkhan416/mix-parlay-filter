@@ -33,40 +33,51 @@ class ParlayScraper:
             try:
                 print(f"  [Scraper] Navigating to {self.url}...")
                 await page.goto(self.url, wait_until="networkidle", timeout=60000)
-                await page.wait_for_timeout(5000) # Beri jeda agar iframe/AJAX selesai dimuat
+                await page.wait_for_timeout(5000)
 
                 wib_tz = zoneinfo.ZoneInfo("Asia/Jakarta")
                 today_date_str = datetime.now(wib_tz).strftime("%Y-%m-%d")
 
-                # kumpulkan semua frame (main frame + iframe embed)
-                all_frames = page.frames
-                print(f"  [Scraper] Found {len(all_frames)} frame(s) in page.")
+                # Filter kata kunci header / noise tabel
+                ignored_keywords = ["soccer", "mix parlay", "today", "select league", "odds", "home", "away", "time"]
 
-                for frame in all_frames:
+                for frame in page.frames:
                     try:
                         rows = await frame.query_selector_all("tr")
                         for row in rows:
                             text_content = await row.inner_text()
                             lines = [line.strip() for line in text_content.split("\n") if line.strip()]
 
-                            # Parsing umum berdasarkan baris teks jika tabel tidak menggunakan class baku
                             if len(lines) >= 3:
-                                # Mencari angka desimal yang bertindak sebagai Odds (misal: 1.35)
+                                # Abaikan jika merupakan header tabel
+                                if any(kw in lines[0].lower() or kw in lines[1].lower() for kw in ignored_keywords):
+                                    continue
+
+                                # Cari elemen tim yang sah (bukan kata 'LIVE' atau jam '00:00')
+                                valid_team_names = []
                                 odds_val = None
+
                                 for item in lines:
                                     clean_item = item.replace(",", ".")
+                                    # Cari angka Odds
                                     try:
                                         val = float(clean_item)
-                                        if 1.01 <= val <= 10.0: # Range odds realistis
+                                        if 1.01 <= val <= 10.0 and odds_val is None:
                                             odds_val = val
-                                            break
+                                            continue
                                     except ValueError:
-                                        continue
+                                        pass
 
-                                if odds_val and len(lines) >= 2:
+                                    # Saring nama tim (abaikan LIVE, jam format 00:00, atau teks pendek noise)
+                                    if item.upper() not in ["LIVE", "TODAY", "CANCEL"] and not item.replace(":", "").isdigit():
+                                        if len(item) > 2 and item.lower() not in ignored_keywords:
+                                            valid_team_names.append(item)
+
+                                # Pastikan ditemukan 2 nama tim (Home & Away) dan nilai Odds
+                                if len(valid_team_names) >= 2 and odds_val:
                                     scraped_matches.append({
-                                        "home": lines[0],
-                                        "away": lines[1],
+                                        "home": valid_team_names[0],
+                                        "away": valid_team_names[1],
                                         "odds_value": odds_val,
                                         "kickoff_iso": f"{today_date_str}T20:00:00"
                                     })
