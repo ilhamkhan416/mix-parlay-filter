@@ -46,30 +46,42 @@ async def run_pipeline():
         print("  [!] Tidak ada jadwal pertandingan resmi dari API. Menghentikan pipeline.")
         return []
 
-    # Sampel Debug untuk Memantau Struktur Data
-    print(f"  🔍 [Debug Sample Scraped]: {odds_data[0]}")
-    print(f"  🔍 [Debug Sample API]: {api_fixtures[0]}")
-
     # Step 3: Pencocokan Entitas Tim (Vectorized TF-IDF)
     print("\n[3/4] Matching Entities (Vectorized TF-IDF)...")
     matcher = EntityMatcher(time_window_minutes=TIME_WINDOW_MINUTES, threshold=FUZZY_THRESHOLD)
     matched_results = matcher.match(odds_data, api_fixtures)
     print(f" -> Berhasil mencocokkan {len(matched_results)} pertandingan.")
 
-    # Step 4: Selective H2H Ingestion & +EV Filtering
-    print("\n[4/4] Ingesting H2H & Evaluating +EV Filter...")
+    # Step 4: Selective H2H & Stats Ingestion & +EV Filtering
+    print("\n[4/4] Ingesting H2H & Team Stats from API-Football...")
     filtered_matched = []
     
     for item in matched_results:
         odds_val = float(item['odds_data'].get('odds_value', 0.0))
         if MIN_ODDS <= odds_val <= MAX_ODDS:
             api_item = item['api_data']
-            # Ambil data H2H secara selektif
-            item['api_data']['h2h'] = api_client.get_h2h_matches(
-                team_id_1=api_item['home_id'],
-                team_id_2=api_item['away_id'],
-                last_n=5
-            )
+            
+            home_id = api_item.get('home_id')
+            away_id = api_item.get('away_id')
+            league_id = api_item.get('league_id')
+
+            # Ingestion H2H Nyata
+            if home_id and away_id:
+                item['api_data']['h2h'] = api_client.get_h2h_matches(
+                    team_id_1=home_id,
+                    team_id_2=away_id,
+                    last_n=5
+                )
+                
+                # Ingestion Stats/Form Nyata
+                current_year = datetime.now(wib_tz).year
+                if league_id:
+                    item['api_data']['stats'] = api_client.get_team_statistics(
+                        team_id=home_id,
+                        league_id=league_id,
+                        season=current_year
+                    )
+            
             filtered_matched.append(item)
 
     print(f" -> {len(filtered_matched)} pertandingan masuk dalam evaluasi EV mendalam.")
@@ -85,9 +97,8 @@ async def run_pipeline():
         for pick in final_picks:
             print(
                 f"  [✓] LAGA: {pick['match']} | "
-                f"👉 PASANG: {pick['pick']} | "
+                f"👉 PASANG: {pick['pick']} ({pick['pick_type']}) | "
                 f"Odds: {pick['selected_odds']} | "
-                f"Est. Win: {pick['estimated_real_prob']} | "
                 f"EV: {pick['expected_value']}"
             )
 
