@@ -1,7 +1,7 @@
 from typing import Dict, List
 
 class ParlayFilterEngine:
-    def __init__(self, min_odds: float = 1.25, max_odds: float = 1.60, min_ev: float = 0.02):
+    def __init__(self, min_odds: float = 1.20, max_odds: float = 1.80, min_ev: float = -0.02):
         self.min_odds = min_odds
         self.max_odds = max_odds
         self.min_ev = min_ev
@@ -69,8 +69,17 @@ class ParlayFilterEngine:
             h2h_data = api_info.get('h2h', [])
             team_stats = api_info.get('stats', {})
             
-            # Hitung probabilitas riil berbasis statistik dinamis
-            estimated_real_prob = self.estimate_real_probability(team_stats, h2h_data, is_home=True)
+            # 1. BACA DINAMIS TIM MANA YANG MEMILIKI ODDS TERSEBUT (HOME ATAU AWAY)
+            pick_type = odds_info.get('pick_type', 'Home Win')
+            selected_pick = odds_info.get('selected_pick')
+            
+            is_home_pick = (pick_type == 'Home Win')
+
+            if not selected_pick:
+                selected_pick = odds_info.get('home' if is_home_pick else 'away', api_info.get('home' if is_home_pick else 'away', 'Team'))
+
+            # 2. HITUNG PROBABILITAS BERDASARKAN SISI TIM YANG DIPILIH
+            estimated_real_prob = self.estimate_real_probability(team_stats, h2h_data, is_home=is_home_pick)
             implied_prob = self.calculate_implied_probability(odds_val)
             ev = self.calculate_expected_value(odds_val, estimated_real_prob)
 
@@ -79,14 +88,11 @@ class ParlayFilterEngine:
 
             home_team = odds_info.get('home', api_info.get('home', 'Home Team'))
             away_team = odds_info.get('away', api_info.get('away', 'Away Team'))
-            
-            # Pilihan tim pemenang yang dievaluasi
-            selected_team = home_team
 
             high_prob_picks.append({
                 "match": f"{home_team} vs {away_team}",
-                "pick": selected_team,
-                "pick_type": "Home Win",
+                "pick": selected_pick,               # Mengembalikan nama tim yang benar (misal: Germany)
+                "pick_type": pick_type,               # Mengembalikan "Away Win" atau "Home Win"
                 "selected_odds": odds_val,
                 "implied_probability": f"{round(implied_prob * 100, 2)}%",
                 "estimated_real_prob": f"{round(estimated_real_prob * 100, 2)}%",
