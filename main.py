@@ -15,6 +15,7 @@ from modules.scraper import ParlayScraper
 from modules.api_football import APIFootballClient
 from modules.matcher import EntityMatcher
 from modules.filter_engine import ParlayFilterEngine
+from modules.wa_notifier import send_whatsapp_parlay_picks
 
 
 async def run_pipeline():
@@ -49,7 +50,7 @@ async def run_pipeline():
     print(f"  🔍 [Debug Sample Scraped]: {odds_data[0]}")
     print(f"  🔍 [Debug Sample API]: {api_fixtures[0]}")
 
-    # Step 3: Pencocokan Entitas Tim (Full String Matcher)
+    # Step 3: Pencocokan Entitas Tim (Vectorized TF-IDF)
     print("\n[3/4] Matching Entities (Vectorized TF-IDF)...")
     matcher = EntityMatcher(time_window_minutes=TIME_WINDOW_MINUTES, threshold=FUZZY_THRESHOLD)
     matched_results = matcher.match(odds_data, api_fixtures)
@@ -63,6 +64,7 @@ async def run_pipeline():
         odds_val = float(item['odds_data'].get('odds_value', 0.0))
         if MIN_ODDS <= odds_val <= MAX_ODDS:
             api_item = item['api_data']
+            # Ambil data H2H secara selektif
             item['api_data']['h2h'] = api_client.get_h2h_matches(
                 team_id_1=api_item['home_id'],
                 team_id_2=api_item['away_id'],
@@ -72,6 +74,7 @@ async def run_pipeline():
 
     print(f" -> {len(filtered_matched)} pertandingan masuk dalam evaluasi EV mendalam.")
 
+    # Evaluasi menggunakan Filter Engine Dinamis
     filter_engine = ParlayFilterEngine(min_odds=MIN_ODDS, max_odds=MAX_ODDS, min_ev=MIN_EXPECTED_VALUE)
     final_picks = filter_engine.evaluate(filtered_matched)
 
@@ -81,9 +84,15 @@ async def run_pipeline():
     else:
         for pick in final_picks:
             print(
-                f"  [✓] {pick['match']} | Odds: {pick['selected_odds']} | "
-                f"Est. Win: {pick['estimated_real_prob']} | EV: {pick['expected_value']}"
+                f"  [✓] LAGA: {pick['match']} | "
+                f"👉 PASANG: {pick['pick']} | "
+                f"Odds: {pick['selected_odds']} | "
+                f"Est. Win: {pick['estimated_real_prob']} | "
+                f"EV: {pick['expected_value']}"
             )
+
+    # Pengiriman Notifikasi Otomatis ke WhatsApp
+    send_whatsapp_parlay_picks(final_picks)
 
     return final_picks
 
