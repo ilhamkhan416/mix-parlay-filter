@@ -15,7 +15,7 @@ class ParlayFilterEngine:
 
     @staticmethod
     def _parse_form_score(form_str: str) -> float:
-        if not form_str:
+        if not form_str or form_str == 'WWDDL':
             return 0.50
         points = 0.0
         clean_form = form_str.upper()[-5:]
@@ -27,8 +27,9 @@ class ParlayFilterEngine:
         return points / len(clean_form) if clean_form else 0.50
 
     def estimate_real_probability(self, team_stats: Dict, h2h_matches: List[Dict], is_home: bool = True) -> tuple:
-        form_str = team_stats.get('form', 'WWDDL')[-5:]
-        form_rate = self._parse_form_score(form_str)
+        raw_form = team_stats.get('form', '')
+        form_str = raw_form[-5:] if raw_form else "N/A"
+        form_rate = self._parse_form_score(raw_form)
 
         h2h_wins = 0
         h2h_details = []
@@ -51,24 +52,24 @@ class ParlayFilterEngine:
             h2h_rate = h2h_wins / total_h2h
         else:
             h2h_rate = form_rate
-            h2h_details = ["Tidak ada riwayat H2H terbaru"]
+            h2h_details = ["Tidak ada data H2H"]
 
         venue_stats = team_stats.get('fixtures', {}).get('wins', {})
         played = venue_stats.get('home' if is_home else 'away', 0)
         wins = venue_stats.get('home' if is_home else 'away', 0)
         venue_rate = (wins / played) if played > 0 else form_rate
 
-        # Bobot statistik: Form (40%), H2H (35%), Venue (25%)
         real_prob = (0.40 * form_rate) + (0.35 * h2h_rate) + (0.25 * venue_rate)
         
-        # Generasi Alasan Pemilihan (Pick Rationale)
+        # Generasi Rationale Bebas Bug
         rationale_parts = []
-        if form_rate >= 0.6:
+        if form_rate >= 0.6 and form_str != "N/A":
             rationale_parts.append(f"Performa 5 laga solid ({form_str})")
-        if h2h_rate >= 0.5:
+        if total_h2h > 0 and h2h_rate >= 0.5:
             rationale_parts.append(f"Dominasi H2H ({h2h_wins}/{total_h2h} menang)")
-        if venue_rate >= 0.5:
+        if played > 0 and venue_rate >= 0.5:
             rationale_parts.append("Rekor laga kandang/tandang kuat")
+            
         if not rationale_parts:
             rationale_parts.append("Statistik gabungan stabil & Odds bernilai menguntungkan")
 
@@ -95,7 +96,6 @@ class ParlayFilterEngine:
             h2h_data = api_info.get('h2h', [])
             team_stats = api_info.get('stats', {})
             
-            # Read dynamic selection (Home vs Away)
             pick_type = odds_info.get('pick_type', 'Home Win')
             selected_pick = odds_info.get('selected_pick')
             is_home_pick = (pick_type == 'Home Win')
@@ -124,16 +124,13 @@ class ParlayFilterEngine:
                 "form_history": form_str,
                 "h2h_history": h2h_details,
                 "rationale": rationale,
-                "league": api_info.get('league_name', 'Unknown')
+                "league": api_info.get('league_name', api_info.get('league', 'Unknown League'))
             })
 
-        # Urutkan candidates berdasarkan nilai EV tertinggi
         candidates.sort(key=lambda x: x['expected_value_num'], reverse=True)
 
-        # Filter utama berdasarkan min_ev
         filtered_picks = [c for c in candidates if c['expected_value_num'] >= self.min_ev]
 
-        # GARANSI MINIMAL 10 PARTAI: Jika hasil filter kurang dari 10, ambil top candidates hingga genap 10
         if len(filtered_picks) < self.min_required_picks and len(candidates) >= self.min_required_picks:
             filtered_picks = candidates[:self.min_required_picks]
         elif len(filtered_picks) < self.min_required_picks:
