@@ -1,10 +1,11 @@
 from typing import Dict, List
 
 class ParlayFilterEngine:
-    def __init__(self, min_odds: float = 1.20, max_odds: float = 1.80, min_ev: float = -0.02):
+    def __init__(self, min_odds: float = 1.20, max_odds: float = 1.80, min_ev: float = -0.02, min_required_picks: int = 10):
         self.min_odds = min_odds
         self.max_odds = max_odds
         self.min_ev = min_ev
+        self.min_required_picks = min_required_picks
 
     @staticmethod
     def calculate_implied_probability(odds: float) -> float:
@@ -25,30 +26,55 @@ class ParlayFilterEngine:
                 points += 0.5
         return points / len(clean_form) if clean_form else 0.50
 
-    def estimate_real_probability(self, team_stats: Dict, h2h_matches: List[Dict], is_home: bool = True) -> float:
-        form_rate = self._parse_form_score(team_stats.get('form', 'WWDDL'))
+    def estimate_real_probability(self, team_stats: Dict, h2h_matches: List[Dict], is_home: bool = True) -> tuple:
+        form_str = team_stats.get('form', 'WWDDL')[-5:]
+        form_rate = self._parse_form_score(form_str)
 
         h2h_wins = 0
+        h2h_details = []
         total_h2h = len(h2h_matches[:5]) if h2h_matches else 0
         
         if total_h2h > 0:
             for match in h2h_matches[:5]:
                 teams = match.get('teams', {})
+                goals = match.get('goals', {})
+                home_name = teams.get('home', {}).get('name', 'Home')
+                away_name = teams.get('away', {}).get('name', 'Away')
+                h_score = goals.get('home', 0)
+                a_score = goals.get('away', 0)
+                
                 winner = teams.get('home', {}) if is_home else teams.get('away', {})
                 if winner.get('winner') is True:
                     h2h_wins += 1
+                
+                h2h_details.append(f"{home_name} {h_score}-{a_score} {away_name}")
             h2h_rate = h2h_wins / total_h2h
         else:
             h2h_rate = form_rate
+            h2h_details = ["Tidak ada riwayat H2H terbaru"]
 
         venue_stats = team_stats.get('fixtures', {}).get('wins', {})
         played = venue_stats.get('home' if is_home else 'away', 0)
         wins = venue_stats.get('home' if is_home else 'away', 0)
         venue_rate = (wins / played) if played > 0 else form_rate
 
-        # Bobot kalkulasi probabilitas riil: Form (40%), H2H (35%), Venue (25%)
+        # Bobot statistik: Form (40%), H2H (35%), Venue (25%)
         real_prob = (0.40 * form_rate) + (0.35 * h2h_rate) + (0.25 * venue_rate)
-        return round(real_prob, 4)
+        
+        # Generasi Alasan Pemilihan (Pick Rationale)
+        rationale_parts = []
+        if form_rate >= 0.6:
+            rationale_parts.append(f"Performa 5 laga solid ({form_str})")
+        if h2h_rate >= 0.5:
+            rationale_parts.append(f"Dominasi H2H ({h2h_wins}/{total_h2h} menang)")
+        if venue_rate >= 0.5:
+            rationale_parts.append("Rekor laga kandang/tandang kuat")
+        if not rationale_parts:
+            rationale_parts.append("Statistik gabungan stabil & Odds bernilai menguntungkan")
+
+        rationale = ", ".join(rationale_parts)
+
+        return round(real_prob, 4), form_str, h2h_details, rationale
 
     def calculate_expected_value(self, odds: float, estimated_prob: float) -> float:
         net_profit = odds - 1.0
@@ -56,7 +82,7 @@ class ParlayFilterEngine:
         return round((estimated_prob * net_profit) - (prob_loss * 1.0), 4)
 
     def evaluate(self, matched_data: List[Dict]) -> List[Dict]:
-        high_prob_picks = []
+        candidates = []
 
         for item in matched_data:
             odds_info = item.get('odds_data', {})
@@ -69,35 +95,48 @@ class ParlayFilterEngine:
             h2h_data = api_info.get('h2h', [])
             team_stats = api_info.get('stats', {})
             
-            # 1. BACA DINAMIS TIM MANA YANG MEMILIKI ODDS TERSEBUT (HOME ATAU AWAY)
+            # Read dynamic selection (Home vs Away)
             pick_type = odds_info.get('pick_type', 'Home Win')
             selected_pick = odds_info.get('selected_pick')
-            
             is_home_pick = (pick_type == 'Home Win')
 
             if not selected_pick:
                 selected_pick = odds_info.get('home' if is_home_pick else 'away', api_info.get('home' if is_home_pick else 'away', 'Team'))
 
-            # 2. HITUNG PROBABILITAS BERDASARKAN SISI TIM YANG DIPILIH
-            estimated_real_prob = self.estimate_real_probability(team_stats, h2h_data, is_home=is_home_pick)
+            estimated_real_prob, form_str, h2h_details, rationale = self.estimate_real_probability(
+                team_stats, h2h_data, is_home=is_home_pick
+            )
             implied_prob = self.calculate_implied_probability(odds_val)
             ev = self.calculate_expected_value(odds_val, estimated_real_prob)
-
-            if ev < self.min_ev:
-                continue
 
             home_team = odds_info.get('home', api_info.get('home', 'Home Team'))
             away_team = odds_info.get('away', api_info.get('away', 'Away Team'))
 
-            high_prob_picks.append({
+            candidates.append({
                 "match": f"{home_team} vs {away_team}",
-                "pick": selected_pick,               # Mengembalikan nama tim yang benar (misal: Germany)
-                "pick_type": pick_type,               # Mengembalikan "Away Win" atau "Home Win"
+                "pick": selected_pick,
+                "pick_type": pick_type,
                 "selected_odds": odds_val,
                 "implied_probability": f"{round(implied_prob * 100, 2)}%",
                 "estimated_real_prob": f"{round(estimated_real_prob * 100, 2)}%",
+                "expected_value_num": ev,
                 "expected_value": f"{'+' if ev > 0 else ''}{round(ev * 100, 2)}%",
+                "form_history": form_str,
+                "h2h_history": h2h_details,
+                "rationale": rationale,
                 "league": api_info.get('league_name', 'Unknown')
             })
 
-        return high_prob_picks
+        # Urutkan candidates berdasarkan nilai EV tertinggi
+        candidates.sort(key=lambda x: x['expected_value_num'], reverse=True)
+
+        # Filter utama berdasarkan min_ev
+        filtered_picks = [c for c in candidates if c['expected_value_num'] >= self.min_ev]
+
+        # GARANSI MINIMAL 10 PARTAI: Jika hasil filter kurang dari 10, ambil top candidates hingga genap 10
+        if len(filtered_picks) < self.min_required_picks and len(candidates) >= self.min_required_picks:
+            filtered_picks = candidates[:self.min_required_picks]
+        elif len(filtered_picks) < self.min_required_picks:
+            filtered_picks = candidates
+
+        return filtered_picks
