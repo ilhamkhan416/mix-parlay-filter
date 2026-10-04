@@ -12,10 +12,6 @@ class APIFootballClient:
         os.makedirs(cache_dir, exist_ok=True)
 
     def get_fixtures_by_date(self, date_str: str) -> List[Dict]:
-        """
-        Mengambil jadwal pertandingan resmi dari API-Football berdasarkan tanggal (YYYY-MM-DD)
-        dengan dukungan sistem caching lokal.
-        """
         cache_file = os.path.join(self.cache_dir, f"fixtures_{date_str}.json")
         
         if os.path.exists(cache_file):
@@ -56,9 +52,6 @@ class APIFootballClient:
         return formatted
 
     def get_h2h_matches(self, team_id_1: int, team_id_2: int, last_n: int = 5) -> List[Dict]:
-        """
-        Mengambil riwayat pertemuan (Head to Head) antara dua tim.
-        """
         sorted_ids = sorted([team_id_1, team_id_2])
         cache_file = os.path.join(self.cache_dir, f"h2h_{sorted_ids[0]}_{sorted_ids[1]}.json")
 
@@ -95,11 +88,11 @@ class APIFootballClient:
 
         return formatted[:last_n]
 
-    def get_team_statistics(self, team_id: int, league_id: int, season: int) -> Dict:
-        """
-        Mengambil data statistik tim (Form & Fixture Wins).
-        Jika endpoint statistik liga kosong, sistem akan otomatis mengambil 5 laga terakhir tim sebagai fallback.
-        """
+    def get_team_statistics(self, team_id: int, league_id: int, season: int = None) -> Dict:
+        from datetime import datetime
+        if not season:
+            season = datetime.now().year - 1
+
         cache_file = os.path.join(self.cache_dir, f"stats_{team_id}_{league_id}_{season}.json")
 
         if os.path.exists(cache_file):
@@ -110,15 +103,25 @@ class APIFootballClient:
         data = {}
         try:
             response = requests.get(f"{self.base_url}/teams/statistics", headers=self.headers, params=params, timeout=15)
-            response.raise_for_status()
-            res_json = response.json()
-            data = res_json.get('response', {})
+            if response.status_code == 200:
+                data = response.json().get('response', {})
         except Exception as e:
-            print(f"❌ Error fetching team stats: {e}")
+            print(f"❌ Error fetching stats for team {team_id}: {e}")
 
         raw_form = data.get("form", "")
 
-        # Fallback Mechanism: Jika form statistik liga kosong, ambil 5 laga terakhir tim dari endpoint /fixtures
+        # Fallback 1: Coba season alternatif (2026 / international)
+        if not raw_form:
+            try:
+                alt_params = {'team': team_id, 'league': league_id, 'season': season + 1}
+                res_alt = requests.get(f"{self.base_url}/teams/statistics", headers=self.headers, params=alt_params, timeout=15)
+                if res_alt.status_code == 200:
+                    data_alt = res_alt.json().get('response', {})
+                    raw_form = data_alt.get("form", "")
+            except Exception:
+                pass
+
+        # Fallback 2: Ambil 5 laga terakhir tim jika data liga kosong
         if not raw_form:
             try:
                 fix_resp = requests.get(
