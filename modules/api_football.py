@@ -18,14 +18,12 @@ class APIFootballClient:
             with open(cache_file, "r") as f:
                 return json.load(f)
 
-        # Hapus 'timezone' dari params agar compatible dengan semua jenis akun API-Football
         params = {'date': date_str}
         try:
             response = requests.get(f"{self.base_url}/fixtures", headers=self.headers, params=params, timeout=15)
             response.raise_for_status()
             res_json = response.json()
 
-            # Log jika ada error khusus dari API-Football (misal: kuota habis)
             if res_json.get('errors'):
                 print(f"  [API Debug Error]: {res_json.get('errors')}")
 
@@ -89,3 +87,43 @@ class APIFootballClient:
                 json.dump(formatted, f, indent=2)
 
         return formatted[:last_n]
+
+    def get_team_statistics(self, team_id: int, league_id: int, season: int) -> Dict:
+        """
+        Mengambil data statistik tim (form, rekor kandang/tandang, dsb.) dari API-Football.
+        """
+        cache_file = os.path.join(self.cache_dir, f"stats_{team_id}_{league_id}_{season}.json")
+
+        if os.path.exists(cache_file):
+            with open(cache_file, "r") as f:
+                return json.load(f)
+
+        params = {
+            'team': team_id,
+            'league': league_id,
+            'season': season
+        }
+        try:
+            response = requests.get(f"{self.base_url}/teams/statistics", headers=self.headers, params=params, timeout=15)
+            response.raise_for_status()
+            res_json = response.json()
+            data = res_json.get('response', {})
+        except Exception as e:
+            print(f"❌ Error fetching team stats: {e}")
+            return {}
+
+        formatted = {
+            "form": data.get("form", ""),
+            "fixtures": {
+                "played": data.get("fixtures", {}).get("played", {}),
+                "wins": data.get("fixtures", {}).get("wins", {}),
+                "draws": data.get("fixtures", {}).get("draws", {}),
+                "loses": data.get("fixtures", {}).get("loses", {})
+            }
+        }
+
+        if formatted["form"]:
+            with open(cache_file, "w") as f:
+                json.dump(formatted, f, indent=2)
+
+        return formatted
