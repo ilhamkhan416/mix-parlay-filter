@@ -60,28 +60,30 @@ async def run_pipeline():
         odds_val = float(item['odds_data'].get('odds_value', 0.0))
         if MIN_ODDS <= odds_val <= MAX_ODDS:
             api_item = item['api_data']
-            
             home_id = api_item.get('home_id')
             away_id = api_item.get('away_id')
             league_id = api_item.get('league_id')
 
-            # Ingestion H2H Nyata
-            if home_id and away_id:
+            # Ambil data H2H
+            if home_id and away_id and hasattr(api_client, 'get_h2h_matches'):
                 item['api_data']['h2h'] = api_client.get_h2h_matches(
                     team_id_1=home_id,
                     team_id_2=away_id,
                     last_n=5
                 )
-                
-                # Ingestion Stats/Form Nyata
+
+            # Ambil data statistik tim jika method tersedia di API client
+            if home_id and hasattr(api_client, 'get_team_statistics'):
                 current_year = datetime.now(wib_tz).year
-                if league_id:
+                try:
                     item['api_data']['stats'] = api_client.get_team_statistics(
                         team_id=home_id,
-                        league_id=league_id,
+                        league_id=league_id or 0,
                         season=current_year
                     )
-            
+                except Exception:
+                    item['api_data']['stats'] = {}
+
             filtered_matched.append(item)
 
     print(f" -> {len(filtered_matched)} pertandingan masuk dalam evaluasi EV mendalam.")
