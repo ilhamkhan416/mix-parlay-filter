@@ -23,7 +23,7 @@ class ParlayFilterEngine:
                 points += 1.0
             elif res == 'D':
                 points += 0.5
-        return points / len(clean_form)
+        return points / len(clean_form) if clean_form else 0.50
 
     def estimate_real_probability(self, team_stats: Dict, h2h_matches: List[Dict], is_home: bool = True) -> float:
         form_rate = self._parse_form_score(team_stats.get('form', 'WWDDL'))
@@ -33,7 +33,8 @@ class ParlayFilterEngine:
         
         if total_h2h > 0:
             for match in h2h_matches[:5]:
-                winner = match.get('teams', {}).get('home', {}) if is_home else match.get('teams', {}).get('away', {})
+                teams = match.get('teams', {})
+                winner = teams.get('home', {}) if is_home else teams.get('away', {})
                 if winner.get('winner') is True:
                     h2h_wins += 1
             h2h_rate = h2h_wins / total_h2h
@@ -45,6 +46,7 @@ class ParlayFilterEngine:
         wins = venue_stats.get('home' if is_home else 'away', 0)
         venue_rate = (wins / played) if played > 0 else form_rate
 
+        # Bobot kalkulasi probabilitas riil: Form (40%), H2H (35%), Venue (25%)
         real_prob = (0.40 * form_rate) + (0.35 * h2h_rate) + (0.25 * venue_rate)
         return round(real_prob, 4)
 
@@ -57,8 +59,8 @@ class ParlayFilterEngine:
         high_prob_picks = []
 
         for item in matched_data:
-            odds_info = item['odds_data']
-            api_info = item['api_data']
+            odds_info = item.get('odds_data', {})
+            api_info = item.get('api_data', {})
             
             odds_val = float(odds_info.get('odds_value', 0.0))
             if not (self.min_odds <= odds_val <= self.max_odds):
@@ -67,6 +69,7 @@ class ParlayFilterEngine:
             h2h_data = api_info.get('h2h', [])
             team_stats = api_info.get('stats', {})
             
+            # Hitung probabilitas riil berbasis statistik dinamis
             estimated_real_prob = self.estimate_real_probability(team_stats, h2h_data, is_home=True)
             implied_prob = self.calculate_implied_probability(odds_val)
             ev = self.calculate_expected_value(odds_val, estimated_real_prob)
@@ -74,12 +77,20 @@ class ParlayFilterEngine:
             if ev < self.min_ev:
                 continue
 
+            home_team = odds_info.get('home', api_info.get('home', 'Home Team'))
+            away_team = odds_info.get('away', api_info.get('away', 'Away Team'))
+            
+            # Pilihan tim pemenang yang dievaluasi
+            selected_team = home_team
+
             high_prob_picks.append({
-                "match": f"{odds_info['home']} vs {odds_info['away']}",
+                "match": f"{home_team} vs {away_team}",
+                "pick": selected_team,
+                "pick_type": "Home Win",
                 "selected_odds": odds_val,
                 "implied_probability": f"{round(implied_prob * 100, 2)}%",
                 "estimated_real_prob": f"{round(estimated_real_prob * 100, 2)}%",
-                "expected_value": f"+{round(ev * 100, 2)}%",
+                "expected_value": f"{'+' if ev > 0 else ''}{round(ev * 100, 2)}%",
                 "league": api_info.get('league_name', 'Unknown')
             })
 
