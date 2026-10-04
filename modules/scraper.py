@@ -38,8 +38,7 @@ class ParlayScraper:
                 wib_tz = zoneinfo.ZoneInfo("Asia/Jakarta")
                 today_date_str = datetime.now(wib_tz).strftime("%Y-%m-%d")
 
-                # Filter kata kunci header / noise tabel
-                ignored_keywords = ["soccer", "mix parlay", "today", "select league", "odds", "home", "away", "time"]
+                ignored_keywords = ["soccer", "mix parlay", "today", "select league", "odds", "home", "away", "time", "draw"]
 
                 for frame in page.frames:
                     try:
@@ -53,34 +52,61 @@ class ParlayScraper:
                                 if any(kw in lines[0].lower() or kw in lines[1].lower() for kw in ignored_keywords):
                                     continue
 
-                                # Cari elemen tim yang sah (bukan kata 'LIVE' atau jam '00:00')
-                                valid_team_names = []
-                                odds_val = None
+                                team_pairs = []
+                                i = 0
+                                while i < len(lines):
+                                    item = lines[i]
+                                    
+                                    # Abaikan label status/jam
+                                    if item.upper() in ["LIVE", "TODAY", "CANCEL"] or item.replace(":", "").isdigit():
+                                        i += 1
+                                        continue
 
-                                for item in lines:
-                                    clean_item = item.replace(",", ".")
-                                    # Cari angka Odds
-                                    try:
-                                        val = float(clean_item)
-                                        if 1.01 <= val <= 10.0 and odds_val is None:
-                                            odds_val = val
-                                            continue
-                                    except ValueError:
-                                        pass
+                                    # Cek jika baris ini merupakan nama tim
+                                    if len(item) > 2 and item.lower() not in ignored_keywords:
+                                        team_name = item
+                                        team_odds = None
 
-                                    # Saring nama tim (abaikan LIVE, jam format 00:00, atau teks pendek noise)
-                                    if item.upper() not in ["LIVE", "TODAY", "CANCEL"] and not item.replace(":", "").isdigit():
-                                        if len(item) > 2 and item.lower() not in ignored_keywords:
-                                            valid_team_names.append(item)
+                                        # Cari odds milik tim tersebut di baris persis setelah nama tim
+                                        for lookahead in range(1, 3):
+                                            if i + lookahead < len(lines):
+                                                possible_odds = lines[i + lookahead].replace(",", ".")
+                                                try:
+                                                    val = float(possible_odds)
+                                                    if 1.01 <= val <= 10.0:
+                                                        team_odds = val
+                                                        break
+                                                except ValueError:
+                                                    pass
 
-                                # Pastikan ditemukan 2 nama tim (Home & Away) dan nilai Odds
-                                if len(valid_team_names) >= 2 and odds_val:
-                                    scraped_matches.append({
-                                        "home": valid_team_names[0],
-                                        "away": valid_team_names[1],
-                                        "odds_value": odds_val,
-                                        "kickoff_iso": f"{today_date_str}T20:00:00"
-                                    })
+                                        team_pairs.append({"name": team_name, "odds": team_odds})
+                                    i += 1
+
+                                # Pastikan terdeteksi minimal 2 tim (Home dan Away)
+                                if len(team_pairs) >= 2:
+                                    home_info = team_pairs[0]
+                                    away_info = team_pairs[1]
+
+                                    # Default panggil Home, tapi jika Odds Away lebih rendah (favorit) / valid, ambil Away
+                                    selected_team = home_info["name"]
+                                    selected_odds = home_info["odds"]
+                                    pick_type = "Home Win"
+
+                                    # Jika odds Away tersedia dan bernilai favorit/lebih rendah dari Home
+                                    if away_info["odds"] and (not home_info["odds"] or away_info["odds"] < home_info["odds"]):
+                                        selected_team = away_info["name"]
+                                        selected_odds = away_info["odds"]
+                                        pick_type = "Away Win"
+
+                                    if selected_odds:
+                                        scraped_matches.append({
+                                            "home": home_info["name"],
+                                            "away": away_info["name"],
+                                            "selected_pick": selected_team,
+                                            "pick_type": pick_type,
+                                            "odds_value": selected_odds,
+                                            "kickoff_iso": f"{today_date_str}T20:00:00"
+                                        })
                     except Exception:
                         continue
 
