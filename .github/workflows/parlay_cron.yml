@@ -2,7 +2,7 @@ name: Mix Parlay Automated Pipeline & Test Engine
 
 on:
   schedule:
-    - cron: '0 1 * * *'  # Berjalan otomatis jam 08:00 WIB
+    - cron: '0 1 * * *'
   workflow_dispatch:
 
 jobs:
